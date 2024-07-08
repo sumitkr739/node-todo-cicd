@@ -1,0 +1,116 @@
+To integrate GitHub with Jenkins via a webhook, you can follow these steps to set up the GitHub Actions workflow and configure the webhook in GitHub to trigger Jenkins builds automatically.
+
+### GitHub Actions Workflow
+
+name: CI/CD Workflow
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  setup:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Update and install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y openjdk-11-jre
+        java -version
+
+    - name: Install Jenkins
+      run: |
+        curl -fsSL https://pkg.jenkins.io/debian/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
+        echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
+        sudo apt-get update
+        sudo apt-get install -y jenkins
+        sudo systemctl enable jenkins
+        sudo systemctl start jenkins
+        sudo systemctl status jenkins
+        sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+
+    - name: Generate SSH keys
+      run: |
+        ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
+        cat ~/.ssh/id_ed25519
+        cat ~/.ssh/id_ed25519.pub
+
+    - name: Setup Node.js and app
+      run: |
+        sudo apt install -y nodejs
+        sudo apt install -y npm
+        cd /var/lib/jenkins/workspace/todo-node-app
+        sudo npm install
+        node app.js
+
+    - name: Build and run Docker container
+      run: |
+        cd /var/lib/jenkins/workspace/todo-node-app
+        echo 'FROM node:14-alpine
+        WORKDIR /app
+        COPY package*.json ./
+        RUN npm install
+        COPY . .
+        EXPOSE 8000
+        CMD ["node", "app.js"]' > Dockerfile
+        sudo docker build . -t todo-node-app
+        sudo docker run -d --name node-todo-app -p 8000:8000 todo-node-app
+        sudo docker ps
+
+    - name: Cleanup
+      run: |
+        sudo docker kill $(sudo docker ps -q)
+        sudo docker system prune -f
+```
+
+### Configuring Webhook in GitHub
+
+1. **Navigate to Repository Settings**:
+   - Go to your GitHub repository.
+   - Click on `Settings`.
+
+2. **Add Webhook**:
+   - In the left sidebar, click on `Webhooks`.
+   - Click the `Add webhook` button.
+
+3. **Webhook Configuration**:
+   - **Payload URL**: Enter your Jenkins server URL followed by `/github-webhook/`. For example, `http://your-jenkins-url/github-webhook/`.
+   - **Content type**: Choose `application/json`.
+   - **Secret**: (Optional) You can add a secret token for security purposes.
+   - **Which events would you like to trigger this webhook?**: Select `Just the push event` (you can customize this based on your needs).
+   - Click the `Add webhook` button.
+
+### Configuring Jenkins to Handle GitHub Webhooks
+
+1. **Install GitHub Integration Plugin**:
+   - Go to your Jenkins dashboard.
+   - Click on `Manage Jenkins`.
+   - Click on `Manage Plugins`.
+   - Install the `GitHub Integration Plugin`.
+
+2. **Create a Jenkins Job**:
+   - Create a new Jenkins job or configure an existing one.
+   - In the job configuration, under `Source Code Management`, choose `Git` and provide your repository URL.
+   - Under `Build Triggers`, check the `GitHub hook trigger for GITScm polling`.
+
+3. **Build and Deploy Scripts**:
+   - Under the `Build` section, add an `Execute shell` step with your Docker build and run commands:
+     ```bash
+     docker build . -t node-app-todo
+     docker run -d --name node-app-container -p 8000:8000 node-app-todo
+     ```
+
+### Final Steps
+
+- Commit and push your GitHub Actions workflow file to your repository.
+- Ensure your Jenkins job is set up correctly and is configured to trigger on GitHub webhook events.
+- Monitor the Actions tab in GitHub and the Jenkins job to verify everything is working as expected.
+
+By following these steps, you can automate the integration between GitHub and Jenkins using webhooks, ensuring that every push to your GitHub repository triggers a build and deployment process on Jenkins.
